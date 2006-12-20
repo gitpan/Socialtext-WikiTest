@@ -1,0 +1,18 @@
+use strict;
+use warnings;
+use ExtUtils::MakeMaker;
+
+WriteMakefile(
+    NAME                => 'Socialtext::WikiTest',
+    AUTHOR              => 'Luke Closs <cpan@5thplane.com>',
+    VERSION_FROM        => 'lib/Socialtext/WikiFixture.pm',
+    PL_FILES            => {},
+    PREREQ_PM => {
+        'Socialtext::Resting' => 0,
+        'Socialtext::Resting::Utils' => 0.03,
+        'Test::More' => 0,
+    },
+    EXE_FILES           => [],
+    dist                => { COMPRESS => 'gzip -9f', SUFFIX => 'gz', },
+    clean               => { FILES => 'Socialtext-WikiTest-*' },
+);

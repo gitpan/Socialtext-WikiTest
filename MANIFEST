@@ -1,0 +1,14 @@
+lib/Socialtext/WikiFixture.pm
+lib/Socialtext/WikiFixture/Selenese.pm
+lib/Socialtext/WikiFixture/Socialtext.pm
+lib/Socialtext/WikiFixture/Null.pm
+lib/Socialtext/WikiObject/TestPlan.pm
+t/fixture.t
+t/fixture-selenese.t
+t/fixture-socialtext.t
+t/testplan.t
+t/lib/Mock/Rester.pm
+t/lib/Test/WWW/Selenium.pm
+Makefile.PL
+META.yml
+MANIFEST

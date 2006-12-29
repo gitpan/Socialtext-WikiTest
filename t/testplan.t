@@ -38,6 +38,22 @@ EOT
     );
 }
 
+Recursive_plan_with_default_fixture: {
+    testplan_ok( 
+        num => 2,
+        plan_content => <<EOT,
+* [Plan1]
+* Wah-wah
+* [Plan2]
+EOT
+        pages => { 
+            'Plan1' => "* Fixture: Null\n| foo |\n",
+            'Plan2' => "* Fixture: Null\n| foo |\n",
+        },
+        tp_args => { default_fixture => 'Null' },
+    );
+}
+
 Default_fixture: {
     testplan_ok( 
         num => 2,

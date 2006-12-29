@@ -11,6 +11,7 @@ WriteMakefile(
         'Socialtext::Resting' => 0,
         'Socialtext::Resting::Utils' => 0.03,
         'Test::More' => 0,
+        'Test::Exception' => 0,
     },
     EXE_FILES           => [],
     dist                => { COMPRESS => 'gzip -9f', SUFFIX => 'gz', },

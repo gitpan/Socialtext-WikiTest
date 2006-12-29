@@ -10,7 +10,7 @@ Socialtext::WikiFixture::Selenese - Executes wiki tables using Selenium RC
 
 =cut
 
-our $VERSION = '0.01';
+our $VERSION = '0.02';
 
 =head1 DESCRIPTION
 
@@ -55,26 +55,53 @@ sub init {
 
     $self->SUPER::init;
 
-    $self->log_in;
-    $self->{selenium}->open('/' . $self->{workspace});
+    $self->st_login;
+    $self->{selenium}->open_ok('/' . $self->{workspace});
 }
 
-=head2 log_in()
+=head2 st_login()
 
 Logs into the Socialtext wiki using supplied username and password.
 
 =cut
 
-sub log_in {
+sub st_login {
     my $self = shift;
     my $sel = $self->{selenium};
 
-    $sel->open('/nlw/login.html');
-    $sel->type('username', $self->{username});
-    $sel->type('password', $self->{password});
-    $sel->click(q{//input[@value='Log in']});
-    $sel->wait_for_page_to_load($self->{selenium_timeout});
-    ok 1, "logged in";
+    my $username = shift || $self->{username};
+    my $password = shift || $self->{password};
+
+    $sel->open_ok('/nlw/login.html');
+    $sel->type_ok('username', $username);
+    $sel->type_ok('password', $password);
+    $self->click_and_wait(q{//input[@value='Log in']}, 'log in');
+}
+
+=head2 st_logout()
+
+Log out of the Socialtext wiki.
+
+=cut
+
+sub st_logout {
+    my $self = shift;
+    $self->click_and_wait('link=Log out', 'log out');
+}
+
+=head2 st_logoutin()
+
+Logs out of the workspace, then logs back in.
+
+A username and password are optional parameters, and will be used in place
+of the configured username and password.
+
+=cut
+
+sub st_logoutin {
+    my ($self, $username, $password) = @_;
+    $self->st_logout;
+    $self->st_login($username, $password);
 }
 
 =head2 st_page_title( $expected_title )
@@ -86,19 +113,6 @@ Verifies that the page title (NOT HTML title) is correct.
 sub st_page_title {
     my ($self, $expected_title) = @_;
     $self->{selenium}->text_like('id=st-page-title', qr/\Q$expected_title\E/);
-}
-
-=head2 st_logoutin()
-
-Logs out of the workspace, then logs back in
-
-=cut
-
-sub st_logoutin {
-    my ($self, $opt1, $opt2) = @_;
-    $self->click_and_wait('link=Log out');
-    $self->log_in;
-    ok 1, 'logged in';
 }
 
 =head2 st_search( $search_term, $expected_result_title )
@@ -113,7 +127,7 @@ sub st_search {
 
     $sel->type_ok('st-search-term', $opt1);
     $sel->click_ok('link=Search');
-    $sel->wait_for_page_to_load($self->{selenium_timeout});
+    $sel->wait_for_page_to_load_ok($self->{selenium_timeout});
     $sel->text_like('id=st-page-title', qr/\Q$opt2\E/);
 }
 
@@ -126,7 +140,33 @@ Validates that the search result content contains a correct result.
 sub st_result {
     my ($self, $opt1, $opt2) = @_;
 
-    $self->{selenium}->text_like('id=st-search-content', qr/\Q$opt1\E/);
+    $self->{selenium}->text_like('id=st-search-content', 
+                                 $self->quote_as_regex($opt1));
+}
+
+=head2 st_submit()
+
+Submits the current form
+
+=cut
+
+sub st_submit {
+    my ($self) = @_;
+
+    $self->click_and_wait(q{//input[@value='Submit']}, 'click submit button');
+}
+
+=head2 st_message()
+
+Verifies an error or message appears.
+
+=cut
+
+sub st_message {
+    my ($self, $message) = @_;
+
+    $self->text_like(q{errors-and-messages},
+                     $self->quote_as_regex($message));
 }
 
 =head2 st_watch_page( $watch_on, $page_name, $verify_only )
@@ -212,6 +252,159 @@ sub st_is_watched {
     my ($self, $watch_on, $page_name) = @_;
     return $self->st_watch_page($watch_on, $page_name, 'verify only');
 }
+
+=head2 st_admin( $command_options )
+
+Runs st_admin command line script with the supplied options.
+
+If the export-workspace command is used, I'll attempt to remove any existing
+workspace tarballs before running the command.
+
+=cut
+
+sub st_admin {
+    my $self = shift;
+    my $options = shift || '';
+    my $verify = $self->quote_as_regex(shift);
+
+    # If we're exporting a workspace, attempt to remove the tarball first
+    if ($options =~ /export-workspace.+--workspace(?:\s+|=)(\S+)/) {
+        my $tarball = "/tmp/$1.1.tar.gz";
+        if (-e $tarball) {
+            diag "Deleting $tarball\n";
+            unlink $tarball;
+        }
+    }
+
+    _run_command("st-admin $options", $verify);
+}
+
+=head2 st_admin_export_workspace_ok( $workspace )
+
+Verifies that a workspace tarball was created.
+
+The workspace parameter is optional.
+
+=cut
+
+sub st_admin_export_workspace_ok {
+    my $self = shift;
+    my $workspace = shift || $self->{workspace};
+    my $tarball = "/tmp/$workspace.1.tar.gz";
+    ok -e $tarball, "$tarball exists";
+}
+
+=head2 st_import_workspace( $options, $verify )
+
+Imports a workspace from a tarball.  If the import is successful,
+a test passes, if not, it fails.  The output is checked against
+$verify.
+
+C<$options> are passed through to st-import-workspace
+
+=cut
+
+sub st_import_workspace {
+    my $self = shift;
+    my $options = shift || '';
+    my $verify = $self->quote_as_regex(shift);
+
+    _run_command("st-import-workspace $options", $verify);
+}
+
+=head2 st_force_confirmation( $email, $password )
+
+Forces confirmation of the supplied email address, and sets the user's
+password to the second option.
+
+=cut
+
+sub st_force_confirmation {
+    my ($self, $email, $password) = @_;
+
+    require Socialtext::User;
+    Socialtext::User->new(username => $email)->confirm_email_address();
+    $self->st_admin("change-password --email '$email' --password '$password'",
+                    'has been changed');
+}
+
+=head2 st_open_confirmation_uri
+
+Open the correct url to confirm an email address.
+
+=cut
+
+sub st_open_confirmation_uri {
+    my ($self, $email) = @_;
+
+    require Socialtext::User;
+    my $uri = Socialtext::User->new(username => $email)->confirmation_uri();
+    # strip off host part
+    $uri =~ s#.+(/nlw/submit/confirm)#$1#;
+    $self->{selenium}->open_ok($uri);
+}
+
+=head2 st_should_be_admin( $email, $should_be )
+
+Clicks the admin check box to for the given user.
+
+=cut
+
+sub st_should_be_admin {
+    my ($self, $email, $should_be) = @_;
+    my $method = ($should_be ? '' : 'un') . 'check_ok';
+    $self->_click_user_row($email, $method, '/td[3]/input');
+}
+
+=head2 st_click_reset_password( $email )
+
+Clicks the reset password check box to for the given user.
+
+Also verifies that the checkbox is no longer checked.
+
+=cut
+
+sub st_click_reset_password {
+    my ($self, $email, $should_be) = @_;
+    my $chk_xpath = $self->_click_user_row($email, 'check_ok', '/td[4]/input');
+    ok !$self->is_checked($chk_xpath), 'reset password checkbox not checked';
+}
+
+sub _click_user_row {
+    my ($self, $email, $method_name, $click_col) = @_;
+    my $sel = $self->{selenium};
+
+    my $row = 1;
+    my $chk_xpath;
+    while(1) {
+        $row++;
+        my $row_email = $sel->get_text("//tbody/tr[$row]/td[2]");
+        diag "row=$row email=($row_email)";
+        last unless $row_email;
+        next unless $email and $row_email =~ /\Q$email\E/;
+        $chk_xpath = "//tbody/tr[$row]$click_col";
+        $sel->$method_name($chk_xpath);
+        $self->click_and_wait('Button');
+        $sel->text_like('st-settings-section', qr/\QChanges Saved\E/);
+        return $chk_xpath;
+    }
+    ok 0, "Could not find '$email' in the table";
+    return;
+}
+
+sub _run_command {
+    my $command = shift;
+    my $verify = shift;
+    my $output = qx($command 2>&1);
+
+    if ($verify) {
+        like $output, $verify, $command if $verify;
+    }
+    else {
+        warn $output;
+    }
+}
+
 
 =head1 AUTHOR
 

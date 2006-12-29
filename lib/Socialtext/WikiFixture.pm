@@ -9,7 +9,7 @@ Socialtext::WikiFixture - Base class for tests specified on a wiki page
 
 =cut
 
-our $VERSION = '0.01';
+our $VERSION = '0.02';
 
 =head1 SYNOPSIS
 

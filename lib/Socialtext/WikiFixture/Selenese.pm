@@ -10,7 +10,7 @@ Socialtext::WikiFixture::Selenese - Executes wiki tables using Selenium RC
 
 =cut
 
-our $VERSION = '0.01';
+our $VERSION = '0.02';
 
 =head1 DESCRIPTION
 
@@ -55,16 +55,33 @@ asks the Selenium Server to launch a browser.
 
 sub init {
     my ($self) = @_;
-    die "Selenium host ('host') is mandatory!" unless $self->{host};
-    die "Selenium browser_url ('server') is mandatory!" unless $self->{host};
 
-    my $sel = Test::WWW::Selenium->new(
-        host => $self->{host},
-        port => $self->{port} || 4444,
-        browser_url => $self->{browser_url},
-    );
-    $self->{selenium} = $sel;
+    unless ($self->{selenium}) {
+        die "Selenium host is mandatory!" unless $self->{host};
+        die "Selenium browser_url is mandatory!" unless $self->{browser_url};
+
+        $self->{selenium} = Test::WWW::Selenium->new(
+            host => $self->{host},
+            port => $self->{port} || 4444,
+            browser_url => $self->{browser_url},
+        );
+        $self->{_started_selenium}++;
+    }
     $self->{selenium_timeout} ||= 10000;
+
+    $self->setup_table_variables;
+}
+
+=head2 setup_table_variables
+
+Called by init() during object creation.  Use it to set variables 
+usable by commands in the wiki test tables.
+
+=cut
+
+sub setup_table_variables {
+    my $self = shift;
+    $self->{start_time} = time;
 }
 
 =head2 end_hook()
@@ -75,8 +92,10 @@ Called by the test plan after testing has finished.  Kills the browser.
 
 sub end_hook {
     my $self = shift;
-    $self->{selenium}->stop;
-    $self->{selenium} = undef;
+    if ($self->{_started_selenium}) {
+        $self->{selenium}->stop;
+        $self->{selenium} = undef;
+    }
 }
 
 =head3 handle_command()
@@ -87,33 +106,79 @@ Called by the test plan to execute each command.
 
 sub handle_command {
     my $self = shift;
-    my ($command, $opt1, $opt2) = @_;
     my $sel = $self->{selenium};
+    my $command = $self->_munge_command(shift);
+    my ($opt1, $opt2) = $self->_munge_options(@_);
 
+    # Convenience method
+    if ($command eq 'text_like' and !$opt2) {
+        $opt2 = $opt1;
+        $opt1 = '//body';
+    }
+
+    if ($command =~ /_(?:un)?like$/) {
+        if ($opt2) {
+            $opt2 = $self->quote_as_regex($opt2);
+        }
+        else {
+            $opt1 = $self->quote_as_regex($opt1);
+        }
+    }
+
+    # Try to guess _ok methods
+    $command .= '_ok' if { map { $_ => 1 } qw(open type) }->{$command};
+    $self->$command($opt1, $opt2);
+}
+
+sub _munge_command {
+    my $self = shift;
+    my $command = shift;
+    
     $command =~ s/-/_/g;
+    $command =~ s/^\*(.+)\*$/$1/;
 
     # Turn Camelcase into perl style (eg: clickAndWait -> click_and_wait)
     while ($command =~ /[A-Z]/) {
-        $command =~ s/([a-z]+)([A-Z])/$1 . '_' . lc($2)/e;
+        $command =~ s/([a-z]*)([A-Z])/($1 ? $1 . '_' : '') . lc($2)/e;
     }
 
     # Map selenese (eg: verify_title => title_like)
     if ($command =~ /^verify_(\w+)$/) {
         $command = lc($1) . '_like';
     }
-    
-    # Quote as regex
-    if ($command =~ /_(?:un)?like$/) {
-        my $var = $opt2 ? \$opt2 : \$opt1;
-        if ($$var =~ qr{^qr/(.+?)/$}) {
-            $$var = qr/$1/;
-        }
-        else {
-            $$var = qr/\Q$$var\E/;
-        }
-    }
 
-    $self->$command($opt1, $opt2);
+    return $command;
+}
+
+sub _munge_options {
+    my $self = shift;
+
+    my @opts;
+    for (@_) {
+        my $var = $_ || '';
+        $var =~ s/%%(\w+)%%/exists $self->{$1} ? $self->{$1} : 'undef' /eg;
+        $var =~ s/\\n/\n/g;
+        push @opts, $var;
+    }
+    return @opts;
+}
+
+
+=head2 quote_as_regex( $option )
+
+Will convert an option to a regex.  If qr// is around the option text,
+the regex will not be escaped.  Be careful with your regexes.
+
+=cut
+
+sub quote_as_regex {
+    my $self = shift;
+    my $var = shift || '';
+
+    if ($var =~ qr{^qr/(.+?)/$}) {
+        return qr/$1/s;
+    }
+    return qr/\Q$var\E/;
 }
 
 =head2 click_and_wait()
@@ -126,8 +191,10 @@ sub click_and_wait {
     my ($self, $opt1, $opt2) = @_;
     my $sel = $self->{selenium};
 
-    $sel->click_ok($opt1);
-    $sel->wait_for_page_to_load($self->{selenium_timeout});
+    my @args;
+    push @args, $opt2 if $opt2;
+    $sel->click_ok($opt1, @args);
+    $sel->wait_for_page_to_load_ok($self->{selenium_timeout}, @args);
 }
 
 =head2 text_present_like()
@@ -139,6 +206,34 @@ Search entire body for given text
 sub text_present_like {
     my ($self, $opt1) = @_;
     $self->{selenium}->text_like('//body', $opt1);
+}
+
+=head2 comment( $comment )
+
+Prints $comment to test output.
+
+=cut
+
+sub comment {
+    my ($self, $comment) = @_;
+    diag '';
+    diag "comment: $comment";
+}
+
+=head2 set( $name, $value )
+
+Stores a variable for later use.
+
+=cut
+
+sub set {
+    my ($self, $name, $value) = @_;
+    unless (defined $name and defined $value) {
+        diag "Both name and value must be defined for set!";
+        return;
+    }
+    $self->{$name} = $value;
+    diag "Set '$name' to '$value'";
 }
 
 =head2 AUTOLOAD

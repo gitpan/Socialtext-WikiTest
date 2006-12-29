@@ -9,7 +9,7 @@ Socialtext::WikiObject::TestPlan - Load wiki pages as Test plan objects
 
 =cut
 
-our $VERSION = '0.01';
+our $VERSION = '0.02';
 
 =head1 SYNOPSIS
 
@@ -80,11 +80,12 @@ Execute the tests.
 sub run_tests {
     my $self = shift;
 
-    my $fixture_class = $self->_fixture || $self->{default_fixture};
-    if (! defined $fixture_class) {
-        # No fixture, look for other testplans instead
+    unless ($self->{table}) {
         $self->_recurse_testplans;
+        return;
     }
+
+    my $fixture_class = $self->_fixture || $self->{default_fixture};
     return unless $self->{table} and $fixture_class;
 
     unless ($fixture_class =~ /::/) {
@@ -113,11 +114,12 @@ sub _recurse_testplans {
 
     for my $i (@{ $self->{items} }) {
         next unless $i =~ /^\[([^\]]+)\]/;
+        warn "# Loading test plan $1...\n";
         my $plan = Socialtext::WikiObject::TestPlan->new(
-            rester => $self->{rester},
             page => $1,
-            server => $self->{server},
-            workspace => $self->{workspace},
+            rester => $self->{rester},
+            default_fixture => $self->{default_fixture},
+            fixture_args => $self->{fixture_args},
         );
         $plan->run_tests;
     }

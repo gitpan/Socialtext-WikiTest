@@ -10,7 +10,7 @@ Socialtext::WikiFixture::Selenese - Executes wiki tables using Selenium RC
 
 =cut
 
-our $VERSION = '0.02';
+our $VERSION = '0.03';
 
 =head1 DESCRIPTION
 
@@ -265,7 +265,8 @@ workspace tarballs before running the command.
 sub st_admin {
     my $self = shift;
     my $options = shift || '';
-    my $verify = $self->quote_as_regex(shift);
+    my $verify = shift;
+    $verify = $self->quote_as_regex($verify) if $verify;
 
     # If we're exporting a workspace, attempt to remove the tarball first
     if ($options =~ /export-workspace.+--workspace(?:\s+|=)(\S+)/) {

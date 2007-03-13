@@ -367,6 +367,17 @@ EOT
         is $like_args[1], qr/foo/s;
     }
 
+    Regular_without_match: {
+        @like_args = ();
+        st_fixture_ok(
+            name => 'regular st-admin without match',
+            plan => <<EOT,
+| st-admin | foo |  |
+EOT
+        );
+        is scalar(@like_args), 0, 'no test done';
+    }
+
     my $workspace = 'invalid';
     my $tarball = "/tmp/$workspace.1.tar.gz";
     Export_workspace_no_existing_old_tarball: {

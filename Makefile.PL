@@ -9,7 +9,7 @@ WriteMakefile(
     PL_FILES            => {},
     PREREQ_PM => {
         'Socialtext::Resting' => 0,
-        'Socialtext::Resting::Utils' => 0.03,
+        'Socialtext::Resting::Utils' => 0.04,
         'Test::More' => 0,
         'Test::Exception' => 0,
     },

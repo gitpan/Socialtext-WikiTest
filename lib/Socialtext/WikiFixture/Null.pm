@@ -20,6 +20,12 @@ sub get_num_calls {
     return $num;
 }
 
-sub handle_command { $CALLS++ }
+sub handle_command { 
+    my $self = shift;
+    my $command = shift;
+    print "Null: $command\n" unless $self->{silent};
+    $CALLS++;
+    die if $command eq 'die';
+}
 
 1;

@@ -1,0 +1,32 @@
+0.05 - Mon Apr  9 11:00:01 PDT 2007
+ - move Socialtext specific code out of this module
+ - move the fixture test utility code into a package 
+ - s/Mock::Rester/Socialtext::Resting::Mock/
+
+0.04 - March 21, 2007
+ - Added a failing test if a testplan dies
+ - updated Socialtext ids based on UI changes
+ - Made Socialtext watchlist code more robust
+ - Change the selenium browser with $ENV{selenium_browser}
+ - Added print_page for debugging
+ - Modified socialtext st_login to redirect to the workspace
+
+0.03 - Mon Mar 12 21:20:05 PDT 2007
+ - Null now prints out commands
+ - Add util/run-wiki-tests example script
+ - test plans that die shouldn't stop all testing
+ - fixed st-admin when called with no verify option
+
+0.02 - Fri Dec 29 15:09:10 PST 2006
+ - added a bunch more Socialtext fixture commands
+ - use click_and_wait more
+ - option description for click_and_wait
+ - enhanced qr// support for most fields
+ - Added mock rester support for local testing from file
+ - Add variable support to selenium commands
+ - Added st-admin fixture command
+ - Added st-force-confirmation command
+
+0.01 - Wed Dec 20 11:43:02 PST 2006
+ - first release
+ - extra awesome

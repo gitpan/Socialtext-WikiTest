@@ -3,7 +3,7 @@ use strict;
 use warnings;
 use Test::More qw/no_plan/;
 use lib 't/lib';
-use Mock::Rester; # mocked
+use Socialtext::Resting::Mock;
 
 BEGIN {
     use lib 'lib';
@@ -47,7 +47,7 @@ Recursive_plan_with_default_fixture: {
 * [Plan2]
 EOT
         pages => { 
-            'Plan1' => "* Fixture: Null\n| die |\n",
+            'Plan1' => "* Fixture: Null\n| bar |\n",
             'Plan2' => "* Fixture: Null\n| foo |\n",
         },
         tp_args => { default_fixture => 'Null' },
@@ -89,7 +89,7 @@ EOT
 sub testplan_ok {
     my %args = @_;
 
-    my $rester = Mock::Rester->new;
+    my $rester = Socialtext::Resting::Mock->new;
     $rester->put_page('Test Plan' => $args{plan_content});
     for my $p (keys %{ $args{pages} }) {
         $rester->put_page($p, $args{pages}{$p});

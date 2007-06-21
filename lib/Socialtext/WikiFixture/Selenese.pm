@@ -2,6 +2,7 @@ package Socialtext::WikiFixture::Selenese;
 use strict;
 use warnings;
 use base 'Socialtext::WikiFixture';
+use Encode;
 use Test::More;
 
 =head1 NAME
@@ -156,7 +157,7 @@ sub _munge_options {
 
     my @opts;
     for (@_) {
-        my $var = $_ || '';
+        my $var = defined $_ ? $_ : '';
         $var =~ s/%%(\w+)%%/exists $self->{$1} ? $self->{$1} : 'undef' /eg;
         $var =~ s/\\n/\n/g;
         push @opts, $var;
@@ -176,6 +177,7 @@ sub quote_as_regex {
     my $self = shift;
     my $var = shift || '';
 
+    Encode::_utf8_on($var) unless Encode::is_utf8($var);
     if ($var =~ qr{^qr/(.+?)/$}) {
         return qr/$1/s;
     }

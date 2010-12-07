@@ -23,16 +23,19 @@ sel_fixture_ok (
 | confirmation_like | pen? |
 | confirmation_like | qr/pen?/ |
 | clickAndWait | foo | |
+| selectAndWait | foo | bar |
 EOT
     tests => [
         [ open_ok => '/' ],
         [ title_like => qr/\Qmonkey\E/ ],
         [ text_like => ['//body', qr/\Qwater\E/] ],
         [ text_like => ['//body', qr/\Qpen?\E/] ],
-        [ text_like => ['//body', qr/pen?/] ],
+        [ text_like => ['//body', qr/pen?/s] ],
         [ confirmation_like => qr/\Qpen?\E/ ],
-        [ confirmation_like => qr/pen?/ ],
+        [ confirmation_like => qr/pen?/s ],
         [ click_ok => 'foo' ],
+        [ wait_for_page_to_load_ok => 10000 ],
+        [ select_ok => ['foo', 'bar'] ],
         [ wait_for_page_to_load_ok => 10000 ],
     ],
 );
@@ -62,10 +65,10 @@ Pass_in_selenium: {
 
 Variable_interpolation: {
     my $f = Socialtext::WikiFixture::Selenese->new(selenium => 'fake');
-    my @opts = $f->_munge_options('%%foo%%');
-    is_deeply \@opts, ['undef'];
+    eval { $f->_munge_options('%%foo%%') };
+    like $@, qr/Undef var - 'foo'/;
     $f->{foo} = 'bar';
-    @opts = $f->_munge_options('%%foo%%');
+    my @opts = $f->_munge_options('%%foo%%');
     is_deeply \@opts, ['bar'];
 }
 
@@ -117,36 +120,6 @@ Quote_as_regex: {
     is $f->quote_as_regex('qr/foo/'), qr/foo/s;
 }
 
-Special_functions: {
-    no warnings qw/redefine once/;
-    my $f = Socialtext::WikiFixture::Selenese->new(selenium => 'fake');
-    my $diag = '';
-    *Socialtext::WikiFixture::Selenese::diag = sub { $diag .= "$_[0]\n" };
-
-    Comment: {
-        $f->comment('foo');
-        is $diag, "\ncomment: foo\n";
-    }
-
-    Set: {
-        $diag = '';
-        $f->set('foo', 'bar');
-        is $diag, "Set 'foo' to 'bar'\n";
-        is $f->{foo}, 'bar';
-    }
-
-    Bad_set: {
-        $diag = '';
-        $f->set('bar');
-        like $diag, qr/Both name and value/;
-        is $f->{bar}, undef;;
-
-        $diag = '';
-        $f->set(undef, 'bar');
-        like $diag, qr/Both name and value/;
-    }
-}
-
 sub sel_fixture_ok {
     my %args = @_;
 
@@ -154,4 +127,44 @@ sub sel_fixture_ok {
         default_fixture => 'Selenese',
         %args,
     );
+}
+
+Higher_permissions: {
+    my %browsers = (
+        '*firefox' => '*chrome',
+        '*iexplore' => '*iehta',
+    );
+    while (my ($low,$high) = each %browsers) {
+        for my $on (1, 0) {
+            my $rester = Socialtext::Resting::Mock->new;
+            my $text = join("",
+                "* Fixture: Selenese\n",
+                $on ? "* HighPermissions\n" : "",
+                "| open | / |\n",
+            );
+
+            $rester->put_page('Test Plan', $text);
+
+            my $plan = Socialtext::WikiObject::TestPlan->new(
+                rester => $rester,
+                page => 'Test Plan',
+                fixture_args => {
+                    browser => $low,
+                    host => 'selenium-server',
+                    username => 'testuser',
+                    password => 'password',
+                    browser_url => 'http://server',
+                    workspace => 'foo',
+                },
+            );
+
+            my $wanted = $on ? $high : $low,
+            my $not = $on ? '' : 'not ';
+
+            $plan->run_tests;
+            is  $plan->{fixture}{browser}, 
+                $wanted, 
+                "${not}HighPermissions causes = $wanted",
+        }
+    }
 }

@@ -4,6 +4,7 @@ use warnings;
 use base 'Socialtext::WikiFixture';
 use Encode;
 use Test::More;
+use Carp qw(croak);
 
 =head1 NAME
 
@@ -65,25 +66,43 @@ sub init {
             host        => $self->{host},
             port        => $self->{port} || 4444,
             browser_url => $self->{browser_url},
-            browser     => $ENV{selenium_browser} || '*firefox',
+            browser     => $self->{browser}  || $ENV{selenium_browser} || '*firefox',
+            verbose     => $self->{verbose},
         );
         $self->{_started_selenium}++;
     }
     $self->{selenium_timeout} ||= 10000;
 
-    $self->setup_table_variables;
+    $self->remove_selenium_frame if $self->{maximize};
 }
 
-=head2 setup_table_variables
+=head2
 
-Called by init() during object creation.  Use it to set variables 
-usable by commands in the wiki test tables.
+This removes the selenium frame accross the top so you can see the whole window
 
 =cut
-
-sub setup_table_variables {
+sub remove_selenium_frame {
     my $self = shift;
-    $self->{start_time} = time;
+    my $cnode = "document.body.childNodes[1].childNodes[1]";
+
+    my $sel = $self->{selenium};
+
+    $sel->open('about:blank');
+
+    $sel->get_eval("window.frames[0].resizeTo(screen.width,screen.height)");
+
+    $sel->{browser_start_command} ||= '';
+    if ($sel->{browser_start_command} =~ /^\*(?:chrome|firefox)$/) {
+        $sel->get_eval("$cnode.firstChild.setAttribute('style','display:none')");
+        $sel->get_eval("$cnode.childNodes[2].style.width = screen.width + 'px'");
+        $sel->get_eval("$cnode.childNodes[2].childNodes[1].style.width = screen.width + 'px'");
+    }
+    elsif ($sel->{browser_start_command} =~ /^\*ie/) {
+        my $iframe = 'document.getElementById("myiframe")';
+        $sel->get_eval("$iframe.contentWindow.moveTo(0,0)");
+        $sel->get_eval("$iframe.outerHeight = screen.availHeight");
+        $sel->get_eval("$iframe.outerWidth = screen.availWidth");
+    }
 }
 
 =head2 end_hook()
@@ -110,7 +129,7 @@ sub handle_command {
     my $self = shift;
     my $sel = $self->{selenium};
     my $command = $self->_munge_command(shift);
-    my ($opt1, $opt2) = $self->_munge_options(@_);
+    my ($opt1, $opt2, @other) = $self->_munge_options(@_);
 
     # Convenience method
     if ($command eq 'text_like' and !$opt2) {
@@ -127,9 +146,10 @@ sub handle_command {
         }
     }
 
+    Encode::_utf8_on($opt2) unless Encode::is_utf8($opt2);
     # Try to guess _ok methods
     $command .= '_ok' if { map { $_ => 1 } qw(open type) }->{$command};
-    $self->$command($opt1, $opt2);
+    $self->$command($opt1, $opt2, @other);
 }
 
 sub _munge_command {
@@ -152,36 +172,14 @@ sub _munge_command {
     return $command;
 }
 
-sub _munge_options {
-    my $self = shift;
+sub _try_condition {
+    my ($self, $condition, $arg, $timeout) = @_;
 
-    my @opts;
-    for (@_) {
-        my $var = defined $_ ? $_ : '';
-        $var =~ s/%%(\w+)%%/exists $self->{$1} ? $self->{$1} : 'undef' /eg;
-        $var =~ s/\\n/\n/g;
-        push @opts, $var;
-    }
-    return @opts;
-}
+    $timeout = $self->{selenium_timeout} unless defined $timeout;
+    $arg =~ s/'/\\'/g;
 
-
-=head2 quote_as_regex( $option )
-
-Will convert an option to a regex.  If qr// is around the option text,
-the regex will not be escaped.  Be careful with your regexes.
-
-=cut
-
-sub quote_as_regex {
-    my $self = shift;
-    my $var = shift || '';
-
-    Encode::_utf8_on($var) unless Encode::is_utf8($var);
-    if ($var =~ qr{^qr/(.+?)/$}) {
-        return qr/$1/s;
-    }
-    return qr/\Q$var\E/;
+    my $cmd = "try { $condition('$arg') ? true : false } catch(e) { false }";
+    $self->{selenium}->wait_for_condition_ok($cmd, $timeout);
 }
 
 =head2 click_and_wait()
@@ -190,17 +188,28 @@ Clicks and waits.
 
 =cut
 
-sub click_and_wait {
-    my ($self, $opt1, $opt2) = @_;
+sub click_and_wait { shift->_and_wait('click_ok', @_) }
+
+=head2 select_and_wait()
+
+Selects and waits.
+
+=cut
+
+sub select_and_wait { shift->_and_wait('select_ok', @_) }
+
+sub _and_wait {
+    my ($self, $method, $opt1, $opt2) = @_;
     my $sel = $self->{selenium};
 
     my @args;
     push @args, $opt2 if $opt2;
-    $sel->click_ok($opt1, @args);
-    $sel->wait_for_page_to_load_ok($self->{selenium_timeout}, @args);
+    $sel->$method($opt1, @args);
+    $sel->wait_for_page_to_load_ok($self->{selenium_timeout});
 }
 
 =head2 text_present_like()
+
 
 Search entire body for given text
 
@@ -211,32 +220,36 @@ sub text_present_like {
     $self->{selenium}->text_like('//body', $opt1);
 }
 
-=head2 comment( $comment )
+=head2 store_value( $name, $locator )
 
-Prints $comment to test output.
-
-=cut
-
-sub comment {
-    my ($self, $comment) = @_;
-    diag '';
-    diag "comment: $comment";
-}
-
-=head2 set( $name, $value )
-
-Stores a variable for later use.
+Stores an element's value as a variable for later use.
 
 =cut
 
-sub set {
-    my ($self, $name, $value) = @_;
-    unless (defined $name and defined $value) {
-        diag "Both name and value must be defined for set!";
+sub store_value {
+    my ($self, $name, $locator) = @_;
+    unless (defined $name and defined $locator) {
+        diag "Both name and locator must be defined for set!";
         return;
     }
-    $self->{$name} = $value;
-    diag "Set '$name' to '$value'";
+    $self->{$name} = $self->{selenium}->get_value($locator);
+    diag "Set '$name' to '$self->{$name}'";
+}
+
+=head2 store_text( $name, $locator )
+
+Stores an element's text as a variable for later use.
+
+=cut
+
+sub store_text {
+    my ($self, $name, $locator) = @_;
+    unless (defined $name and defined $locator) {
+        diag "Both name and locator must be defined for set!";
+        return;
+    }
+    $self->{$name} = $self->{selenium}->get_text($locator);
+    diag "Set '$name' to '$self->{$name}'";
 }
 
 =head2 print_page()
@@ -251,12 +264,90 @@ sub print_page {
     print $self->get_text('//body');
 }
 
+=head2 pause($timeout)
+
+Waits $timeout milliseconds (default: 1 second)
+
+=cut
+
+sub pause {
+    my ($self,$timeout) = @_;
+    $timeout = 1000  unless defined $timeout;
+    $timeout /= 1000;
+    sleep $timeout;
+}
+
+=head2 wait_for_text_present_ok($text, $timeout)
+
+Waits until $text is present in the html source
+
+=cut
+
+sub wait_for_text_present_ok {
+    my $self = shift;
+    $self->_try_condition('selenium.isTextPresent',@_);
+}
+
+=head2 wait_for_element_present_ok($locator, $timeout)
+
+Waits until $locator is present
+
+=cut
+
+sub wait_for_element_present_ok {
+    my $self = shift;
+    $self->_try_condition('selenium.isElementPresent',@_);
+}
+
+=head2 wait_for_element_visible_ok($locator, $timeout)
+
+Waits until $locator is visible
+
+=cut
+
+sub wait_for_element_visible_ok {
+    my $self = shift;
+    $self->_try_condition('selenium.isVisible',@_);
+}
+
+=head2 wait_for_text_not_present_ok($text, $timeout)
+
+Waits until $text is not present in the html source
+
+=cut
+
+sub wait_for_text_not_present_ok {
+    my $self = shift;
+    $self->_try_condition('!selenium.isTextPresent',@_);
+}
+
+=head2 wait_for_element_not_present_ok($locator, $timeout)
+
+Waits until $locator is not present
+
+=cut
+
+sub wait_for_element_not_present_ok {
+    my $self = shift;
+    $self->_try_condition('!selenium.isElementPresent',@_);
+}
+
+=head2 wait_for_element_not_visible_ok($locator, $timeout)
+
+Waits until $locator is not visible
+
+=cut
+
+sub wait_for_element_not_visible_ok {
+    my $self = shift;
+    $self->_try_condition('!selenium.isVisible',@_);
+}
+
 =head2 AUTOLOAD
 
 Any functions not specified are passed to Test::WWW::Selenium
 
 =cut
-
 our $AUTOLOAD;
 sub AUTOLOAD {
     my $name = $AUTOLOAD;

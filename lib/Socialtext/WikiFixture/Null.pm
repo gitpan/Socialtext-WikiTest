@@ -23,8 +23,16 @@ sub get_num_calls {
 sub handle_command { 
     my $self = shift;
     my $command = shift;
-    print "Null: $command\n" unless $self->{silent};
+
+    if ($self->can($command)) {
+        $self->$command(@_);
+    }
+    else {
+        print "Null: $command\n" unless $self->{silent};
+    }
     $CALLS++;
+    $self->{calls}{$command}++;
+    push @{ $self->{args}{$command} }, \@_;
     die if $command eq 'die';
 }
 

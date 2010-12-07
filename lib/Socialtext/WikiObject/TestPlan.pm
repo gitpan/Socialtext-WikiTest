@@ -87,17 +87,63 @@ sub run_tests {
     }
 
     my $fixture_class = $self->_fixture || $self->{default_fixture};
-    return unless $self->{table} and $fixture_class;
 
-    unless ($fixture_class =~ /::/) {
-        $fixture_class = "Socialtext::WikiFixture::$fixture_class";
+    if ($self->{table} and $fixture_class) {
+        unless ($fixture_class =~ /::/) {
+            $fixture_class = "Socialtext::WikiFixture::$fixture_class";
+        }
+
+        eval "require $fixture_class";
+        die "Can't load fixture $fixture_class $@\n" if $@;
+
+        $self->_raise_permissions;
+
+        $self->{fixture_args}{testplan} ||= $self;
+        my $fix = $fixture_class->new( %{ $self->{fixture_args} } );
+        $self->{fixture} = $fix;
+        $fix->run_test_table($self->{table});
     }
 
-    eval "require $fixture_class";
-    die "Can't load fixture $fixture_class $@\n" if $@;
+    $self->_check_headers;
+}
 
-    my $fix = $fixture_class->new( %{ $self->{fixture_args} } );
-    $fix->run_test_table($self->{table});
+sub _check_headers {
+    my $self = shift;
+    my $heads = $self->{headings};
+    if ($heads and @$heads) {
+        my $head = $heads->[0];
+        if ($head =~ /^done_testing$/i) {
+            # nothing
+        }
+        elsif ($head =~ /^skip(?:: (.*))?/i) {
+            my $msg = $1 || "Skip!";
+            my $skipped = $self->{$head} || [ 1 ];
+            SKIP: {
+                skip($msg, scalar @$skipped);
+            }
+        }
+        elsif ($head =~ /^todo(?:: (.*))?/i) {
+            local $TODO = $1 || "Unamed";
+            Test::More::fail();
+        }
+        else {
+            die "Stopped at '$head'\n";
+        }
+    }
+}
+
+sub _raise_permissions {
+    my $self = shift;
+    my %browsers = (
+        '*firefox' => '*chrome',
+        '*iexplore' => '*iehta',
+    );
+    my $browser = $self->{fixture_args}{browser};
+    for (@{ $self->{items} || [] }) {
+        if (/^highpermissions$/i and $browsers{$browser}) {
+            $self->{fixture_args}{browser} = $browsers{$browser};
+        }
+    }
 }
 
 # Find the fixture in the page
@@ -117,15 +163,22 @@ sub _recurse_testplans {
         next unless $i =~ /^\[([^\]]+)\]/;
         my $page = $1;
         warn "# Loading test plan $page...\n";
-        my $plan = Socialtext::WikiObject::TestPlan->new(
-            page => $page,
-            rester => $self->{rester},
-            default_fixture => $self->{default_fixture},
-            fixture_args => $self->{fixture_args},
-        );
+        my $plan = $self->new_testplan($page);
         eval { $plan->run_tests };
         ok 0, "Error during test plan $page: $@" if $@;
     }
+}
+
+sub new_testplan {
+    my $self = shift;
+    my $page = shift;
+
+    return Socialtext::WikiObject::TestPlan->new(
+        page => $page,
+        rester => $self->{rester},
+        default_fixture => $self->{default_fixture},
+        fixture_args => $self->{fixture_args},
+    );
 }
 
 1;

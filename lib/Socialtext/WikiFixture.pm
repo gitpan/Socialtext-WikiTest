@@ -2,6 +2,7 @@ package Socialtext::WikiFixture;
 use strict;
 use warnings;
 use Test::WWW::Selenium;
+use Test::More;
 
 =head1 NAME
 
@@ -9,7 +10,7 @@ Socialtext::WikiFixture - Base class for tests specified on a wiki page
 
 =cut
 
-our $VERSION = '0.05';
+our $VERSION = '0.06';
 
 =head1 SYNOPSIS
 
@@ -39,6 +40,7 @@ sub new {
     bless $self, $class;
 
     $self->init;
+    $self->setup_table_variables;
 
     return $self;
 }
@@ -49,7 +51,7 @@ Optional initialization hook for subclasses.  Called from new().
 
 =cut
 
-sub init {}
+sub init { }
 
 =head2 run_test_table( $table_ref )
 
@@ -60,16 +62,35 @@ be an array ref of array refs.
 
 sub run_test_table {
     my $self = shift;
-    my $table = shift;
+    $self->{table} = shift;
 
-    for my $row (@$table) {
+    while (my $row = $self->_next_row) {
         $row->[0] =~ s/^\s*//;
         next unless $row->[0];
         next if $row->[0] =~ /^\*?command\*?$/i; # header
+
+        _escape_options($row);
         $self->handle_command(@$row);
     }
 
     $self->end_hook;
+}
+
+sub _next_row {
+    my $self = shift;
+    return shift @{ $self->{table} };
+}
+
+sub _escape_options {
+    my $row = shift;
+
+    for my $cell (@$row) {
+        # Trim backticks
+        $cell =~ s/^`(.+)`$/$1/;
+
+        # un-escape backticks
+        $cell =~ s/^\\`(.+)\\`$/`$1`/;
+    }
 }
 
 =head2 end_hook()
@@ -83,11 +104,121 @@ sub end_hook {}
 
 =head2 handle_command( @row )
 
-Run the command.  Subclasses will implement this.
+Run the command.  Subclasses can override this.
 
 =cut
 
-sub handle_command { die 'Subclass must implement' }
+sub handle_command {
+    my $self = shift;
+    my $command = shift;
+    $command =~ s/-/_/g;
+    die "Bad command for the fixture: ($command)\n"
+        unless $self->can($command);
+
+    $self->$command( $self->_munge_options(@_) );
+}
+
+sub _munge_options {
+    my $self = shift;
+
+    my @opts;
+    for (@_) {
+        my $var = defined $_ ? $_ : '';
+        $var =~ s/%%(\w+)%%/exists $self->{$1} ? $self->{$1} : die "Undef var - '$1'"/eg;
+        $var =~ s/\\n/\n/g;
+        push @opts, $var;
+    }
+    return @opts;
+}
+
+=head2 setup_table_variables
+
+Called by init() during object creation.  Use it to set variables 
+usable by commands in the wiki test tables.
+
+=cut
+
+sub setup_table_variables {
+    my $self = shift;
+    $self->{start_time} = time;
+}
+
+=head2 quote_as_regex( $option )
+
+Will convert an option to a regex.  If qr// is around the option text,
+the regex will not be escaped.  Be careful with your regexes.
+
+=cut
+
+sub quote_as_regex {
+    my $self = shift;
+    my $var = shift || '';
+
+    Encode::_utf8_on($var) unless Encode::is_utf8($var);
+    if ($var =~ qr{^qr/(.+?)/([imosx]*)$}) {
+        my $mods = $2 || 's';
+        return eval "qr/$1/$mods";
+    }
+    return qr/\Q$var\E/;
+}
+
+=head2 include( $page_name )
+
+Include the wiki test table from $page_name into the current table.
+
+It's kind of like a subroutine call.
+
+=cut
+
+sub include {
+    my $self      = shift;
+    my $page_name = shift;
+
+    print "# Including wikitest commands from $page_name\n";
+    my $tp = $self->{testplan}->new_testplan($page_name);
+
+    unshift @{ $self->{table} }, @{ $tp->{table} };
+}
+
+=head2 set( $name, $value )
+
+Stores a variable for later use.
+
+=cut
+
+sub set {
+    my ($self, $name, $value, $default) = @_;
+    unless (defined $name and defined $value) {
+        diag "Both name and value must be defined for set!";
+        return;
+    }
+
+    # Don't set the value if the default flag was passed in
+    return if $default and defined $self->{$name};
+
+    $self->{$name} = $value;
+    diag "Set '$name' to '$value'";
+}
+
+=head2 set_default( $name, $value )
+
+Stores a variable for later use, but only if it is not already set.
+
+=cut
+
+sub set_default { shift->set(@_, 1) }
+
+=head2 comment( $comment )
+
+Prints $comment to test output.
+
+=cut
+
+sub comment {
+    my ($self, $comment) = @_;
+    diag '';
+    diag "comment: $comment";
+}
 
 =head1 AUTHOR
 
